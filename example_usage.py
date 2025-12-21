@@ -1,0 +1,76 @@
+"""
+Example usage script for video object detection.
+This demonstrates how to use the VideoObjectDetector class programmatically.
+"""
+
+from video_object_detection import VideoObjectDetector, evaluate_detections, create_evaluation_report
+import os
+
+def main():
+    # Configuration
+    input_video = "input_video.mp4"  # Change to your video file
+    output_video = "output_video.mp4"
+    model_name = "yolov8n.pt"  # Pre-trained YOLO model
+    confidence_threshold = 0.25
+    ground_truth_file = "ground_truth.json"  # Optional
+    
+    # Check if input video exists
+    if not os.path.exists(input_video):
+        print(f"Error: Input video not found: {input_video}")
+        print("Please provide a valid video file path.")
+        return
+    
+    # Initialize detector
+    print("Initializing YOLO detector...")
+    detector = VideoObjectDetector(
+        model_name=model_name,
+        confidence_threshold=confidence_threshold
+    )
+    
+    # Process video
+    print(f"\nProcessing video: {input_video}")
+    stats = detector.process_video(input_video, output_video, save_detections=True)
+    
+    # Print statistics
+    print("\n" + "="*80)
+    print("PROCESSING STATISTICS")
+    print("="*80)
+    print(f"Total frames: {stats['total_frames']}")
+    print(f"Total detections: {stats['total_detections']}")
+    print(f"Average detections per frame: {stats['avg_detections_per_frame']:.2f}")
+    print(f"Video resolution: {stats['resolution'][0]}x{stats['resolution'][1]}")
+    print(f"FPS: {stats['fps']}")
+    
+    # Evaluate if ground truth is available
+    detections_path = output_video.replace('.mp4', '_detections.json')
+    if os.path.exists(ground_truth_file):
+        print(f"\nEvaluating with ground truth: {ground_truth_file}")
+        evaluation_results = evaluate_detections(
+            detections_path,
+            ground_truth_file,
+            iou_threshold=0.5
+        )
+        
+        # Create evaluation report
+        report_path = output_video.replace('.mp4', '_evaluation_report.txt')
+        create_evaluation_report(evaluation_results, report_path)
+        
+        # Print summary
+        print("\n" + "="*80)
+        print("EVALUATION SUMMARY")
+        print("="*80)
+        print(f"Mean IOU: {evaluation_results['mean_iou']:.4f}")
+        print(f"Median IOU: {evaluation_results['median_iou']:.4f}")
+        print(f"Total matches: {evaluation_results['total_matches']}")
+        print(f"Detailed report saved to: {report_path}")
+    else:
+        print(f"\nGround truth file not found: {ground_truth_file}")
+        print("To create ground truth annotations, run:")
+        print(f"  python annotate_ground_truth.py --video {input_video} --output {ground_truth_file}")
+    
+    print(f"\nOutput video saved to: {output_video}")
+    print("Processing complete!")
+
+if __name__ == '__main__':
+    main()
+
