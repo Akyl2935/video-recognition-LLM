@@ -5,6 +5,7 @@ This project implements a video object detection system using YOLO (You Only Loo
 ## Features
 
 - **Object Detection**: Uses pre-trained YOLO models (YOLOv8) to detect objects in video frames
+- **Object Tracking (Optional)**: Tracks objects across frames and assigns stable track IDs
 - **Bounding Box Visualization**: Draws bounding boxes around detected objects in the output video
 - **Ground Truth Comparison**: Compares detection results with manually annotated ground truth data
 - **IOU Evaluation**: Calculates IOU, precision, recall, and F1 metrics
@@ -42,6 +43,12 @@ python video_object_detection.py --input input_video.mp4 --output output_video.m
 python video_object_detection.py --input input_video.mp4 --output output_video.mp4 --ground-truth ground_truth.json
 ```
 
+#### 3. Process with tracking enabled
+
+```bash
+python video_object_detection.py --input input_video.mp4 --output output_video.mp4 --class-id 0 --track
+```
+
 #### Command-line arguments
 
 - `--input`: Path to input video file (required)
@@ -51,6 +58,8 @@ python video_object_detection.py --input input_video.mp4 --output output_video.m
 - `--class-id`: COCO class ID to detect (default: 0 = person). Use `2` for cars.
 - `--ground-truth`: Path to ground truth JSON file (optional)
 - `--iou-threshold`: IoU threshold in [0, 1] for matching (default: 0.5)
+- `--track`: Enable multi-object tracking and include track IDs in output
+- `--tracker`: Ultralytics tracker config (default: `bytetrack.yaml`)
 
 ### Option 2: Use the Jupyter notebook
 
@@ -81,7 +90,7 @@ Annotation controls:
 After processing, these files are generated:
 
 1. **Output Video** (`output_video.mp4`): Input video with detections drawn
-2. **Detections JSON** (`output_video_detections.json`): Per-frame detection output
+2. **Detections JSON** (`output_video_detections.json`): Per-frame detection output (includes `track_id` when tracking is enabled)
 3. **Evaluation Report** (`output_video_evaluation_report.txt`): Detailed evaluation metrics (if ground truth is provided)
 
 Sidecar files are derived from the output filename stem, so they work for non-`.mp4` output names too.

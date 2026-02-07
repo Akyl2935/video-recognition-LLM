@@ -17,6 +17,8 @@ def main():
     output_video = "output_video.mp4"
     model_name = "yolov8n.pt"  # Pre-trained YOLO model
     confidence_threshold = 0.25
+    enable_tracking = False
+    tracker_config = "bytetrack.yaml"
     ground_truth_file = "ground_truth.json"  # Optional
     
     # Check if input video exists
@@ -29,7 +31,9 @@ def main():
     print("Initializing YOLO detector...")
     detector = VideoObjectDetector(
         model_name=model_name,
-        confidence_threshold=confidence_threshold
+        confidence_threshold=confidence_threshold,
+        enable_tracking=enable_tracking,
+        tracker_config=tracker_config,
     )
     
     # Process video
@@ -45,6 +49,8 @@ def main():
     print(f"Average detections per frame: {stats['avg_detections_per_frame']:.2f}")
     print(f"Video resolution: {stats['resolution'][0]}x{stats['resolution'][1]}")
     print(f"FPS: {stats['fps']}")
+    if stats.get("tracking_enabled"):
+        print(f"Unique tracks: {stats['unique_tracks']}")
     
     # Evaluate if ground truth is available
     detections_path = build_output_artifact_path(output_video, '_detections.json')

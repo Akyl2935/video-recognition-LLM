@@ -8,6 +8,7 @@ from video_object_detection import (
     calculate_iou,
     evaluate_detections,
     match_detections_to_ground_truth,
+    track_color,
 )
 
 
@@ -61,7 +62,10 @@ class EvaluationTests(unittest.TestCase):
             str(Path("results") / "video_detections.json"),
         )
 
+    def test_track_color_is_stable(self):
+        self.assertEqual(track_color(12), track_color(12))
+        self.assertNotEqual(track_color(12), track_color(13))
+
 
 if __name__ == "__main__":
     unittest.main()
-

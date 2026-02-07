@@ -44,6 +44,15 @@ def normalize_frame_map(frame_map: Dict[str, Any], source_name: str) -> Dict[int
     return normalized
 
 
+def track_color(track_id: int) -> Tuple[int, int, int]:
+    """Generate a stable BGR color for a track ID."""
+    return (
+        (37 * track_id) % 256,
+        (17 * track_id + 89) % 256,
+        (97 * track_id + 43) % 256,
+    )
+
+
 class VideoObjectDetector:
     """Class for detecting objects in video using YOLO and evaluating with IOU."""
     
@@ -52,6 +61,8 @@ class VideoObjectDetector:
         model_name: str = 'yolov8n.pt',
         confidence_threshold: float = 0.25,
         detection_class: int = 0,
+        enable_tracking: bool = False,
+        tracker_config: str = 'bytetrack.yaml',
     ):
         """
         Initialize the detector with a YOLO model.
@@ -66,6 +77,8 @@ class VideoObjectDetector:
             )
         if detection_class < 0:
             raise ValueError(f"detection_class must be >= 0, got {detection_class}")
+        if enable_tracking and not tracker_config:
+            raise ValueError("tracker_config is required when tracking is enabled")
 
         # Keep ultralytics optional for utility usage (evaluation/report helpers).
         from ultralytics import YOLO
@@ -73,6 +86,8 @@ class VideoObjectDetector:
         self.model = YOLO(model_name)
         self.confidence_threshold = confidence_threshold
         self.detection_class = detection_class  # default 0 = person in COCO dataset
+        self.enable_tracking = enable_tracking
+        self.tracker_config = tracker_config
         # Store a readable label for annotations
         model_names = getattr(self.model, 'names', {}) or {}
         self.detection_label = model_names.get(self.detection_class, f"Class {self.detection_class}")
@@ -87,22 +102,36 @@ class VideoObjectDetector:
         Returns:
             List of detections, each containing bbox, confidence, and class
         """
-        results = self.model(frame, conf=self.confidence_threshold, verbose=False)
+        if self.enable_tracking:
+            results = self.model.track(
+                frame,
+                conf=self.confidence_threshold,
+                persist=True,
+                tracker=self.tracker_config,
+                verbose=False,
+            )
+        else:
+            results = self.model(frame, conf=self.confidence_threshold, verbose=False)
         detections = []
         
         for result in results:
             boxes = result.boxes
+            track_ids = None
+            if self.enable_tracking and boxes.id is not None:
+                track_ids = boxes.id.int().cpu().numpy().tolist()
             for i in range(len(boxes)):
                 box = boxes.xyxy[i].cpu().numpy()  # [x1, y1, x2, y2]
                 confidence = float(boxes.conf[i].cpu().numpy())
                 class_id = int(boxes.cls[i].cpu().numpy())
+                track_id = int(track_ids[i]) if track_ids is not None else None
                 
                 # Filter by class (0 = person)
                 if class_id == self.detection_class:
                     detections.append({
                         'bbox': box.tolist(),  # [x1, y1, x2, y2]
                         'confidence': confidence,
-                        'class_id': class_id
+                        'class_id': class_id,
+                        'track_id': track_id,
                     })
         
         return detections
@@ -124,12 +153,18 @@ class VideoObjectDetector:
             bbox = det['bbox']
             x1, y1, x2, y2 = map(int, bbox)
             confidence = det['confidence']
+            track_id = det.get('track_id')
+            color = (0, 255, 0)
+            if track_id is not None:
+                color = track_color(track_id)
             
             # Draw rectangle
-            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
             
             # Draw label with confidence
             label = f"{self.detection_label} {confidence:.2f}"
+            if track_id is not None:
+                label = f"{self.detection_label} #{track_id} {confidence:.2f}"
             label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
             label_top = max(0, y1 - label_size[1] - 10)
             label_bottom = max(label_size[1] + 4, y1)
@@ -137,7 +172,7 @@ class VideoObjectDetector:
                 annotated_frame,
                 (x1, label_top),
                 (x1 + label_size[0], label_bottom),
-                (0, 255, 0),
+                color,
                 -1,
             )
             text_y = max(label_size[1] + 2, y1 - 5)
@@ -192,11 +227,12 @@ class VideoObjectDetector:
         all_detections: Dict[str, List[Dict[str, Any]]] = {}
         frame_count = 0
         total_detections = 0
+        track_ids_seen = set()
 
         print(f"Processing video: {input_video_path}")
         print(
             f"Total frames: {total_frames}, FPS: {fps:.2f}, "
-            f"Resolution: {frame_width}x{frame_height}"
+            f"Resolution: {frame_width}x{frame_height}, Tracking: {self.enable_tracking}"
         )
 
         try:
@@ -208,6 +244,10 @@ class VideoObjectDetector:
                 # Detect objects
                 detections = self.detect_objects_in_frame(frame)
                 total_detections += len(detections)
+                if self.enable_tracking:
+                    for det in detections:
+                        if det.get('track_id') is not None:
+                            track_ids_seen.add(det['track_id'])
 
                 # Save detections for this frame
                 if save_detections:
@@ -239,13 +279,17 @@ class VideoObjectDetector:
             'total_detections': total_detections,
             'avg_detections_per_frame': total_detections / frame_count if frame_count > 0 else 0,
             'fps': fps,
-            'resolution': (frame_width, frame_height)
+            'resolution': (frame_width, frame_height),
+            'tracking_enabled': self.enable_tracking,
+            'unique_tracks': len(track_ids_seen),
         }
 
         print(f"\nProcessing complete!")
         print(f"Total frames: {frame_count}")
         print(f"Total detections: {total_detections}")
         print(f"Average detections per frame: {stats['avg_detections_per_frame']:.2f}")
+        if self.enable_tracking:
+            print(f"Unique tracks: {stats['unique_tracks']}")
         print(f"Output video saved to: {output_video_path}")
 
         return stats
@@ -522,6 +566,17 @@ def main():
     parser.add_argument('--iou-threshold', type=float, default=0.5, help='IOU threshold for matching')
     parser.add_argument('--class-id', type=int, default=0,
                         help='COCO class ID to detect (e.g., 0=person, 2=car, 7=truck)')
+    parser.add_argument(
+        '--track',
+        action='store_true',
+        help='Enable multi-object tracking and include track IDs in output',
+    )
+    parser.add_argument(
+        '--tracker',
+        type=str,
+        default='bytetrack.yaml',
+        help='Ultralytics tracker config (used when --track is enabled)',
+    )
     
     args = parser.parse_args()
 
@@ -537,6 +592,8 @@ def main():
         model_name=args.model,
         confidence_threshold=args.confidence,
         detection_class=args.class_id,
+        enable_tracking=args.track,
+        tracker_config=args.tracker,
     )
     
     # Process video
