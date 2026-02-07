@@ -7,12 +7,41 @@ It also compares detection results with ground truth data using Intersection ove
 import cv2
 import numpy as np
 import json
-import os
 from pathlib import Path
-from typing import List, Tuple, Dict
-from ultralytics import YOLO
-import matplotlib.pyplot as plt
-from collections import defaultdict
+from typing import Any, List, Tuple, Dict
+
+
+DEFAULT_VIDEO_FPS = 30.0
+
+
+def build_output_artifact_path(output_video_path: str, artifact_suffix: str) -> str:
+    """
+    Build a sidecar artifact path from the output video path.
+
+    Example:
+      my/video.mov + "_detections.json" -> my/video_detections.json
+    """
+    video_path = Path(output_video_path)
+    if video_path.suffix:
+        base_path = video_path.with_suffix("")
+    else:
+        base_path = video_path
+    return str(base_path.parent / f"{base_path.name}{artifact_suffix}")
+
+
+def normalize_frame_map(frame_map: Dict[str, Any], source_name: str) -> Dict[int, Any]:
+    """Convert JSON frame keys to integers with clear validation errors."""
+    normalized = {}
+    for frame_key, frame_value in frame_map.items():
+        try:
+            frame_number = int(frame_key)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid frame key '{frame_key}' in {source_name}. "
+                "Expected integer-like frame numbers as JSON keys."
+            ) from exc
+        normalized[frame_number] = frame_value
+    return normalized
 
 
 class VideoObjectDetector:
@@ -31,6 +60,16 @@ class VideoObjectDetector:
             model_name: Name of the YOLO model file (e.g., 'yolov8n.pt')
             confidence_threshold: Minimum confidence for detections
         """
+        if not 0.0 <= confidence_threshold <= 1.0:
+            raise ValueError(
+                f"confidence_threshold must be between 0 and 1, got {confidence_threshold}"
+            )
+        if detection_class < 0:
+            raise ValueError(f"detection_class must be >= 0, got {detection_class}")
+
+        # Keep ultralytics optional for utility usage (evaluation/report helpers).
+        from ultralytics import YOLO
+
         self.model = YOLO(model_name)
         self.confidence_threshold = confidence_threshold
         self.detection_class = detection_class  # default 0 = person in COCO dataset
@@ -92,10 +131,25 @@ class VideoObjectDetector:
             # Draw label with confidence
             label = f"{self.detection_label} {confidence:.2f}"
             label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-            cv2.rectangle(annotated_frame, (x1, y1 - label_size[1] - 10), 
-                         (x1 + label_size[0], y1), (0, 255, 0), -1)
-            cv2.putText(annotated_frame, label, (x1, y1 - 5), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+            label_top = max(0, y1 - label_size[1] - 10)
+            label_bottom = max(label_size[1] + 4, y1)
+            cv2.rectangle(
+                annotated_frame,
+                (x1, label_top),
+                (x1 + label_size[0], label_bottom),
+                (0, 255, 0),
+                -1,
+            )
+            text_y = max(label_size[1] + 2, y1 - 5)
+            cv2.putText(
+                annotated_frame,
+                label,
+                (x1, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 0, 0),
+                2,
+            )
         
         return annotated_frame
     
@@ -113,60 +167,73 @@ class VideoObjectDetector:
             Dictionary with processing statistics
         """
         cap = cv2.VideoCapture(input_video_path)
-        
+        out = None
+
         if not cap.isOpened():
             raise ValueError(f"Could not open video file: {input_video_path}")
-        
+
         # Get video properties
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            fps = DEFAULT_VIDEO_FPS
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
+
+        output_path = Path(output_video_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
         # Define codec and create VideoWriter
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_video_path, fourcc, fps, (frame_width, frame_height))
-        
-        all_detections = {}
+        out = cv2.VideoWriter(str(output_path), fourcc, fps, (frame_width, frame_height))
+        if not out.isOpened():
+            raise ValueError(f"Could not create output video file: {output_video_path}")
+
+        all_detections: Dict[str, List[Dict[str, Any]]] = {}
         frame_count = 0
         total_detections = 0
-        
+
         print(f"Processing video: {input_video_path}")
-        print(f"Total frames: {total_frames}, FPS: {fps}, Resolution: {frame_width}x{frame_height}")
-        
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # Detect objects
-            detections = self.detect_objects_in_frame(frame)
-            total_detections += len(detections)
-            
-            # Save detections for this frame
-            if save_detections:
-                all_detections[frame_count] = detections
-            
-            # Draw bounding boxes
-            annotated_frame = self.draw_bounding_boxes(frame, detections)
-            
-            # Write frame to output video
-            out.write(annotated_frame)
-            
-            frame_count += 1
-            if frame_count % 30 == 0:
-                print(f"Processed {frame_count}/{total_frames} frames...")
-        
-        cap.release()
-        out.release()
-        
+        print(
+            f"Total frames: {total_frames}, FPS: {fps:.2f}, "
+            f"Resolution: {frame_width}x{frame_height}"
+        )
+
+        try:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Detect objects
+                detections = self.detect_objects_in_frame(frame)
+                total_detections += len(detections)
+
+                # Save detections for this frame
+                if save_detections:
+                    all_detections[str(frame_count)] = detections
+
+                # Draw bounding boxes
+                annotated_frame = self.draw_bounding_boxes(frame, detections)
+
+                # Write frame to output video
+                out.write(annotated_frame)
+
+                frame_count += 1
+                if frame_count % 30 == 0:
+                    print(f"Processed {frame_count}/{total_frames} frames...")
+        finally:
+            cap.release()
+            if out is not None:
+                out.release()
+
         # Save detections to JSON
         if save_detections:
-            detections_path = output_video_path.replace('.mp4', '_detections.json')
-            with open(detections_path, 'w') as f:
+            detections_path = build_output_artifact_path(output_video_path, '_detections.json')
+            with open(detections_path, 'w', encoding='utf-8') as f:
                 json.dump(all_detections, f, indent=2)
             print(f"Detections saved to: {detections_path}")
-        
+
         stats = {
             'total_frames': frame_count,
             'total_detections': total_detections,
@@ -174,13 +241,13 @@ class VideoObjectDetector:
             'fps': fps,
             'resolution': (frame_width, frame_height)
         }
-        
+
         print(f"\nProcessing complete!")
         print(f"Total frames: {frame_count}")
         print(f"Total detections: {total_detections}")
         print(f"Average detections per frame: {stats['avg_detections_per_frame']:.2f}")
         print(f"Output video saved to: {output_video_path}")
-        
+
         return stats
 
 
@@ -205,8 +272,8 @@ def calculate_iou(boxA: List[float], boxB: List[float]) -> float:
     inter_area = max(0, xB - xA) * max(0, yB - yA)
     
     # Compute area of both bounding boxes
-    boxA_area = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
-    boxB_area = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
+    boxA_area = max(0, boxA[2] - boxA[0]) * max(0, boxA[3] - boxA[1])
+    boxB_area = max(0, boxB[2] - boxB[0]) * max(0, boxB[3] - boxB[1])
     
     # Compute IOU
     union_area = boxA_area + boxB_area - inter_area
@@ -288,39 +355,62 @@ def evaluate_detections(detections_path: str, ground_truth_path: str,
     Returns:
         Dictionary with evaluation metrics
     """
+    if not 0.0 <= iou_threshold <= 1.0:
+        raise ValueError(f"iou_threshold must be between 0 and 1, got {iou_threshold}")
+
     # Load detections
-    with open(detections_path, 'r') as f:
+    with open(detections_path, 'r', encoding='utf-8') as f:
         detections = json.load(f)
-    
+
     # Load ground truth
-    with open(ground_truth_path, 'r') as f:
+    with open(ground_truth_path, 'r', encoding='utf-8') as f:
         ground_truth = json.load(f)
-    
-    all_ious = []
-    frame_metrics = {}
-    
-    for frame_num_str, frame_detections in detections.items():
-        frame_num = int(frame_num_str)
-        
-        if str(frame_num) not in ground_truth:
-            continue
-        
-        gt_boxes = ground_truth[str(frame_num)]
-        matched_ious, match_flags = match_detections_to_ground_truth(
+
+    detection_by_frame = normalize_frame_map(detections, "detections file")
+    ground_truth_by_frame = normalize_frame_map(ground_truth, "ground truth file")
+
+    all_ious: List[float] = []
+    frame_metrics: Dict[int, Dict[str, Any]] = {}
+    total_true_positives = 0
+    total_false_positives = 0
+    total_false_negatives = 0
+
+    # Evaluate on the union of frames so missing detections on GT frames count as false negatives.
+    all_frames = sorted(set(detection_by_frame) | set(ground_truth_by_frame))
+    for frame_num in all_frames:
+        frame_detections = detection_by_frame.get(frame_num, [])
+        gt_boxes = ground_truth_by_frame.get(frame_num, [])
+
+        matched_ious, _ = match_detections_to_ground_truth(
             frame_detections, gt_boxes, iou_threshold
         )
-        
         all_ious.extend(matched_ious)
-        
+
         # Calculate metrics for this frame
         true_positives = len(matched_ious)
-        false_positives = sum(1 for flag in match_flags if not flag)
+        false_positives = len(frame_detections) - true_positives
         false_negatives = len(gt_boxes) - true_positives
-        
-        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
-        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
-        f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-        
+
+        total_true_positives += true_positives
+        total_false_positives += false_positives
+        total_false_negatives += false_negatives
+
+        precision = (
+            true_positives / (true_positives + false_positives)
+            if (true_positives + false_positives) > 0
+            else 0
+        )
+        recall = (
+            true_positives / (true_positives + false_negatives)
+            if (true_positives + false_negatives) > 0
+            else 0
+        )
+        f1_score = (
+            2 * (precision * recall) / (precision + recall)
+            if (precision + recall) > 0
+            else 0
+        )
+
         frame_metrics[frame_num] = {
             'true_positives': true_positives,
             'false_positives': false_positives,
@@ -328,20 +418,48 @@ def evaluate_detections(detections_path: str, ground_truth_path: str,
             'precision': precision,
             'recall': recall,
             'f1_score': f1_score,
-            'avg_iou': np.mean(matched_ious) if matched_ious else 0,
-            'matched_ious': matched_ious
+            'avg_iou': float(np.mean(matched_ious)) if matched_ious else 0,
+            'matched_ious': matched_ious,
+            'detections': len(frame_detections),
+            'ground_truth_boxes': len(gt_boxes),
         }
-    
+
+    overall_precision = (
+        total_true_positives / (total_true_positives + total_false_positives)
+        if (total_true_positives + total_false_positives) > 0
+        else 0
+    )
+    overall_recall = (
+        total_true_positives / (total_true_positives + total_false_negatives)
+        if (total_true_positives + total_false_negatives) > 0
+        else 0
+    )
+    overall_f1 = (
+        2 * (overall_precision * overall_recall) / (overall_precision + overall_recall)
+        if (overall_precision + overall_recall) > 0
+        else 0
+    )
+
     # Overall metrics
     overall_metrics = {
-        'mean_iou': np.mean(all_ious) if all_ious else 0,
-        'median_iou': np.median(all_ious) if all_ious else 0,
-        'min_iou': np.min(all_ious) if all_ious else 0,
-        'max_iou': np.max(all_ious) if all_ious else 0,
+        'mean_iou': float(np.mean(all_ious)) if all_ious else 0,
+        'median_iou': float(np.median(all_ious)) if all_ious else 0,
+        'min_iou': float(np.min(all_ious)) if all_ious else 0,
+        'max_iou': float(np.max(all_ious)) if all_ious else 0,
         'total_matches': len(all_ious),
+        'total_true_positives': total_true_positives,
+        'total_false_positives': total_false_positives,
+        'total_false_negatives': total_false_negatives,
+        'overall_precision': overall_precision,
+        'overall_recall': overall_recall,
+        'overall_f1_score': overall_f1,
+        'evaluated_frames': len(all_frames),
+        'frames_with_ground_truth': sum(
+            1 for frame_num in all_frames if len(ground_truth_by_frame.get(frame_num, [])) > 0
+        ),
         'frame_metrics': frame_metrics
     }
-    
+
     return overall_metrics
 
 
@@ -365,6 +483,14 @@ def create_evaluation_report(evaluation_results: Dict, output_path: str):
         f.write(f"Min IOU: {evaluation_results['min_iou']:.4f}\n")
         f.write(f"Max IOU: {evaluation_results['max_iou']:.4f}\n")
         f.write(f"Total Matches: {evaluation_results['total_matches']}\n\n")
+        f.write(f"Evaluated Frames: {evaluation_results['evaluated_frames']}\n")
+        f.write(f"Frames with Ground Truth: {evaluation_results['frames_with_ground_truth']}\n")
+        f.write(f"Total True Positives: {evaluation_results['total_true_positives']}\n")
+        f.write(f"Total False Positives: {evaluation_results['total_false_positives']}\n")
+        f.write(f"Total False Negatives: {evaluation_results['total_false_negatives']}\n")
+        f.write(f"Overall Precision: {evaluation_results['overall_precision']:.4f}\n")
+        f.write(f"Overall Recall: {evaluation_results['overall_recall']:.4f}\n")
+        f.write(f"Overall F1 Score: {evaluation_results['overall_f1_score']:.4f}\n\n")
         
         f.write("PER-FRAME METRICS\n")
         f.write("-" * 80 + "\n")
@@ -398,6 +524,13 @@ def main():
                         help='COCO class ID to detect (e.g., 0=person, 2=car, 7=truck)')
     
     args = parser.parse_args()
+
+    if not 0.0 <= args.confidence <= 1.0:
+        parser.error(f"--confidence must be between 0 and 1, got {args.confidence}")
+    if not 0.0 <= args.iou_threshold <= 1.0:
+        parser.error(f"--iou-threshold must be between 0 and 1, got {args.iou_threshold}")
+    if args.class_id < 0:
+        parser.error(f"--class-id must be >= 0, got {args.class_id}")
     
     # Initialize detector
     detector = VideoObjectDetector(
@@ -411,12 +544,12 @@ def main():
     
     # Evaluate if ground truth is provided
     if args.ground_truth:
-        detections_path = args.output.replace('.mp4', '_detections.json')
-        if os.path.exists(detections_path):
+        detections_path = build_output_artifact_path(args.output, '_detections.json')
+        if Path(detections_path).exists():
             evaluation_results = evaluate_detections(
                 detections_path, args.ground_truth, args.iou_threshold
             )
-            report_path = args.output.replace('.mp4', '_evaluation_report.txt')
+            report_path = build_output_artifact_path(args.output, '_evaluation_report.txt')
             create_evaluation_report(evaluation_results, report_path)
         else:
             print(f"Warning: Detections file not found: {detections_path}")
@@ -424,4 +557,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

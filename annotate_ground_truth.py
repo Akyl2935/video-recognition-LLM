@@ -7,7 +7,6 @@ It allows selecting frames and drawing bounding boxes around objects.
 import cv2
 import json
 import numpy as np
-from pathlib import Path
 
 
 class BoundingBoxAnnotator:
@@ -86,89 +85,108 @@ class BoundingBoxAnnotator:
         Returns:
             True if annotation was saved, False if cancelled
         """
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-        ret, frame = self.cap.read()
-        
-        if not ret:
-            print(f"Could not read frame {frame_num}")
+        if frame_num < 0 or frame_num >= self.total_frames:
+            print(f"Frame {frame_num} is out of range (0 to {self.total_frames - 1})")
             return False
-        
-        self.current_frame_num = frame_num
-        self.current_boxes = []
-        
-        # Load existing annotations for this frame if any
-        if str(frame_num) in self.annotations:
-            self.current_boxes = self.annotations[str(frame_num)].copy()
-        
-        window_name = f"Annotate Frame {frame_num} - Click and drag to draw boxes"
-        cv2.namedWindow(window_name)
-        cv2.setMouseCallback(window_name, self.mouse_callback)
-        
-        print(f"\nAnnotating frame {frame_num}")
+
+        current_frame = frame_num
+        print(f"\nStarting annotation at frame {frame_num}")
         print("Instructions:")
         print("  - Click and drag to draw bounding boxes")
-        print("  - Press 's' to save annotations for this frame")
+        print("  - Press 's' to save annotations for current frame and exit")
         print("  - Press 'd' to delete last box")
         print("  - Press 'c' to clear all boxes")
         print("  - Press 'q' to quit without saving")
         print("  - Press 'n' to go to next frame")
         print("  - Press 'p' to go to previous frame")
-        
+
         while True:
-            annotated_frame = self.draw_boxes_on_frame(frame)
-            
-            # Add frame info
-            info_text = f"Frame {frame_num}/{self.total_frames-1} | Boxes: {len(self.current_boxes)}"
-            cv2.putText(annotated_frame, info_text, (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            
-            cv2.imshow(window_name, annotated_frame)
-            key = cv2.waitKey(1) & 0xFF
-            
-            if key == ord('s'):
-                # Save annotations
-                if self.current_boxes:
-                    self.annotations[str(frame_num)] = self.current_boxes.copy()
-                    print(f"Saved {len(self.current_boxes)} boxes for frame {frame_num}")
-                else:
-                    print("No boxes to save")
-                cv2.destroyWindow(window_name)
-                return True
-                
-            elif key == ord('d'):
-                # Delete last box
-                if self.current_boxes:
-                    self.current_boxes.pop()
-                    print(f"Deleted last box. Remaining: {len(self.current_boxes)}")
-                    
-            elif key == ord('c'):
-                # Clear all boxes
-                self.current_boxes = []
-                print("Cleared all boxes")
-                
-            elif key == ord('q'):
-                # Quit without saving
-                cv2.destroyWindow(window_name)
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+            ret, frame = self.cap.read()
+
+            if not ret:
+                print(f"Could not read frame {current_frame}")
                 return False
-                
-            elif key == ord('n'):
-                # Next frame
-                if frame_num < self.total_frames - 1:
+
+            self.current_frame_num = current_frame
+            self.current_boxes = self.annotations.get(str(current_frame), []).copy()
+
+            window_name = f"Annotate Frame {current_frame} - Click and drag to draw boxes"
+            cv2.namedWindow(window_name)
+            cv2.setMouseCallback(window_name, self.mouse_callback)
+            print(f"\nAnnotating frame {current_frame}")
+
+            while True:
+                annotated_frame = self.draw_boxes_on_frame(frame)
+
+                # Add frame info
+                info_text = (
+                    f"Frame {current_frame}/{self.total_frames-1} | "
+                    f"Boxes: {len(self.current_boxes)}"
+                )
+                cv2.putText(
+                    annotated_frame,
+                    info_text,
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (255, 255, 255),
+                    2,
+                )
+
+                cv2.imshow(window_name, annotated_frame)
+                key = cv2.waitKey(1) & 0xFF
+
+                if key == ord('s'):
+                    # Save annotations for this frame; empty list removes stale frame annotation.
+                    frame_key = str(current_frame)
+                    if self.current_boxes:
+                        self.annotations[frame_key] = self.current_boxes.copy()
+                        print(f"Saved {len(self.current_boxes)} boxes for frame {current_frame}")
+                    else:
+                        if frame_key in self.annotations:
+                            del self.annotations[frame_key]
+                            print(f"Removed annotations for frame {current_frame}")
+                        else:
+                            print("No boxes to save")
                     cv2.destroyWindow(window_name)
-                    return self.annotate_frame(frame_num + 1)
-                else:
+                    return True
+
+                if key == ord('d'):
+                    # Delete last box
+                    if self.current_boxes:
+                        self.current_boxes.pop()
+                        print(f"Deleted last box. Remaining: {len(self.current_boxes)}")
+                    continue
+
+                if key == ord('c'):
+                    # Clear all boxes
+                    self.current_boxes = []
+                    print("Cleared all boxes")
+                    continue
+
+                if key == ord('q'):
+                    # Quit without saving
+                    cv2.destroyWindow(window_name)
+                    return False
+
+                if key == ord('n'):
+                    # Next frame
+                    if current_frame < self.total_frames - 1:
+                        current_frame += 1
+                        cv2.destroyWindow(window_name)
+                        break
                     print("Already at last frame")
-                    
-            elif key == ord('p'):
-                # Previous frame
-                if frame_num > 0:
-                    cv2.destroyWindow(window_name)
-                    return self.annotate_frame(frame_num - 1)
-                else:
+                    continue
+
+                if key == ord('p'):
+                    # Previous frame
+                    if current_frame > 0:
+                        current_frame -= 1
+                        cv2.destroyWindow(window_name)
+                        break
                     print("Already at first frame")
-        
-        cv2.destroyWindow(window_name)
-        return False
+                    continue
     
     def save_annotations(self, output_path: str):
         """Save annotations to JSON file."""
@@ -213,6 +231,14 @@ def main():
     print(f"\nVideo: {args.video}")
     print(f"Total frames: {annotator.total_frames}")
     print(f"FPS: {annotator.fps}")
+
+    if args.frame < 0 or args.frame >= annotator.total_frames:
+        print(
+            f"Error: starting frame {args.frame} is out of range "
+            f"(0 to {annotator.total_frames - 1})"
+        )
+        annotator.release()
+        return
     
     # Annotate starting from specified frame
     annotator.annotate_frame(args.frame)
@@ -224,4 +250,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

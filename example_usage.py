@@ -3,7 +3,12 @@ Example usage script for video object detection.
 This demonstrates how to use the VideoObjectDetector class programmatically.
 """
 
-from video_object_detection import VideoObjectDetector, evaluate_detections, create_evaluation_report
+from video_object_detection import (
+    VideoObjectDetector,
+    build_output_artifact_path,
+    evaluate_detections,
+    create_evaluation_report,
+)
 import os
 
 def main():
@@ -42,8 +47,12 @@ def main():
     print(f"FPS: {stats['fps']}")
     
     # Evaluate if ground truth is available
-    detections_path = output_video.replace('.mp4', '_detections.json')
+    detections_path = build_output_artifact_path(output_video, '_detections.json')
     if os.path.exists(ground_truth_file):
+        if not os.path.exists(detections_path):
+            print(f"\nDetections file not found: {detections_path}")
+            print("Skipping evaluation.")
+            return
         print(f"\nEvaluating with ground truth: {ground_truth_file}")
         evaluation_results = evaluate_detections(
             detections_path,
@@ -52,7 +61,7 @@ def main():
         )
         
         # Create evaluation report
-        report_path = output_video.replace('.mp4', '_evaluation_report.txt')
+        report_path = build_output_artifact_path(output_video, '_evaluation_report.txt')
         create_evaluation_report(evaluation_results, report_path)
         
         # Print summary
@@ -61,6 +70,9 @@ def main():
         print("="*80)
         print(f"Mean IOU: {evaluation_results['mean_iou']:.4f}")
         print(f"Median IOU: {evaluation_results['median_iou']:.4f}")
+        print(f"Overall Precision: {evaluation_results['overall_precision']:.4f}")
+        print(f"Overall Recall: {evaluation_results['overall_recall']:.4f}")
+        print(f"Overall F1: {evaluation_results['overall_f1_score']:.4f}")
         print(f"Total matches: {evaluation_results['total_matches']}")
         print(f"Detailed report saved to: {report_path}")
     else:
@@ -73,4 +85,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
