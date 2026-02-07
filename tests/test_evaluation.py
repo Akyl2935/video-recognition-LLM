@@ -1,9 +1,14 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from video_object_detection import (
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.video_recognition import (
     build_output_artifact_path,
     calculate_iou,
     evaluate_detections,

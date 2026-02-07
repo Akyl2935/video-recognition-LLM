@@ -3,19 +3,26 @@ Example usage script for video object detection.
 This demonstrates how to use the VideoObjectDetector class programmatically.
 """
 
-from video_object_detection import (
+import os
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.video_recognition import (
     VideoObjectDetector,
     build_output_artifact_path,
     evaluate_detections,
     create_evaluation_report,
 )
-import os
 
 def main():
     # Configuration
-    input_video = "input_video.mp4"  # Change to your video file
-    output_video = "output_video.mp4"
-    model_name = "yolov8n.pt"  # Pre-trained YOLO model
+    input_video = "data/samples/personWalking.mp4"
+    output_video = "outputs/output_video.mp4"
+    model_name = "models/yolov8n.pt"  # Pre-trained YOLO model
     confidence_threshold = 0.25
     enable_tracking = False
     tracker_config = "bytetrack.yaml"
@@ -84,7 +91,10 @@ def main():
     else:
         print(f"\nGround truth file not found: {ground_truth_file}")
         print("To create ground truth annotations, run:")
-        print(f"  python annotate_ground_truth.py --video {input_video} --output {ground_truth_file}")
+        print(
+            f"  python scripts/annotate_ground_truth.py --video {input_video} "
+            f"--output {ground_truth_file}"
+        )
     
     print(f"\nOutput video saved to: {output_video}")
     print("Processing complete!")

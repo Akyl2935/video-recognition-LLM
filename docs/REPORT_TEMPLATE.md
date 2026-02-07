@@ -110,14 +110,16 @@ This report presents the results of object detection in video using YOLO (You On
 ## 8. Appendix
 
 ### 8.1 Code References
-- Main detection script: `video_object_detection.py`
-- Annotation tool: `annotate_ground_truth.py`
-- Jupyter notebook: `video_object_detection.ipynb`
+- Main detection script: `scripts/video_object_detection.py`
+- Annotation tool: `scripts/annotate_ground_truth.py`
+- Core detection module: `src/video_recognition/detection.py`
+- Core annotation module: `src/video_recognition/annotation.py`
+- Jupyter notebook: `notebooks/video_object_detection.ipynb`
 
 ### 8.2 Output Files
-- Output video: `output_video.mp4`
-- Detections JSON: `output_video_detections.json`
-- Evaluation report: `output_video_evaluation_report.txt`
+- Output video: `outputs/output_video.mp4`
+- Detections JSON: `outputs/output_video_detections.json`
+- Evaluation report: `outputs/output_video_evaluation_report.txt`
 
 ---
 

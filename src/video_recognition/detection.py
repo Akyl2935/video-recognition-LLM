@@ -58,7 +58,7 @@ class VideoObjectDetector:
     
     def __init__(
         self,
-        model_name: str = 'yolov8n.pt',
+        model_name: str = 'models/yolov8n.pt',
         confidence_threshold: float = 0.25,
         detection_class: int = 0,
         enable_tracking: bool = False,
@@ -559,8 +559,8 @@ def main():
     
     parser = argparse.ArgumentParser(description='Video Object Detection using YOLO')
     parser.add_argument('--input', type=str, required=True, help='Input video file path')
-    parser.add_argument('--output', type=str, default='output_video.mp4', help='Output video file path')
-    parser.add_argument('--model', type=str, default='yolov8n.pt', help='YOLO model file')
+    parser.add_argument('--output', type=str, default='outputs/output_video.mp4', help='Output video file path')
+    parser.add_argument('--model', type=str, default='models/yolov8n.pt', help='YOLO model file')
     parser.add_argument('--confidence', type=float, default=0.25, help='Confidence threshold')
     parser.add_argument('--ground-truth', type=str, default=None, help='Path to ground truth JSON file')
     parser.add_argument('--iou-threshold', type=float, default=0.5, help='IOU threshold for matching')

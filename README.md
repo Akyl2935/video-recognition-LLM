@@ -1,196 +1,117 @@
 # Video Object Detection using YOLO
 
-This project implements a video object detection system using YOLO (You Only Look Once) to detect objects (primarily people) in video files frame-by-frame. The system marks detected objects with bounding boxes and evaluates detection accuracy using Intersection over Union (IOU) metrics.
+This project performs object detection (and optional tracking) on video files using YOLOv8, writes annotated video output, and evaluates detections against ground-truth boxes using IoU-based metrics.
+
+## Project Layout
+
+```text
+.
+|-- data/
+|   `-- samples/
+|-- docs/
+|   `-- REPORT_TEMPLATE.md
+|-- examples/
+|   `-- example_usage.py
+|-- models/
+|   `-- yolov8n.pt
+|-- notebooks/
+|   `-- video_object_detection.ipynb
+|-- outputs/
+|-- scripts/
+|   |-- video_object_detection.py
+|   `-- annotate_ground_truth.py
+|-- src/
+|   `-- video_recognition/
+|       |-- detection.py
+|       `-- annotation.py
+|-- tests/
+|   `-- test_evaluation.py
+|-- requirements.txt
+`-- README.md
+```
 
 ## Features
 
-- **Object Detection**: Uses pre-trained YOLO models (YOLOv8) to detect objects in video frames
-- **Object Tracking (Optional)**: Tracks objects across frames and assigns stable track IDs
-- **Bounding Box Visualization**: Draws bounding boxes around detected objects in the output video
-- **Ground Truth Comparison**: Compares detection results with manually annotated ground truth data
-- **IOU Evaluation**: Calculates IOU, precision, recall, and F1 metrics
-- **Annotation Tool**: Interactive tool for manually creating ground truth annotations
+- Object detection with YOLOv8
+- Optional multi-object tracking (`--track`) with persistent track IDs
+- Annotated output video generation
+- Ground-truth annotation tool
+- Evaluation metrics: IoU, precision, recall, F1
+- Unit tests for evaluation and utility logic
 
-## Requirements
-
-- Python 3.8 or higher
-- See `requirements.txt` for all dependencies
-
-## Installation
-
-1. Clone or download this repository
-2. Install required packages:
+## Setup
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. The YOLO model will be automatically downloaded on first use (for example, `yolov8n.pt`)
-
 ## Usage
 
-### Option 1: Use the Python script
-
-#### 1. Process a video with object detection
+### Run detection
 
 ```bash
-python video_object_detection.py --input input_video.mp4 --output output_video.mp4
+python scripts/video_object_detection.py --input data/samples/personWalking.mp4 --output outputs/output_video.mp4
 ```
 
-#### 2. Process and evaluate against ground truth
+### Run detection with tracking
 
 ```bash
-python video_object_detection.py --input input_video.mp4 --output output_video.mp4 --ground-truth ground_truth.json
+python scripts/video_object_detection.py --input data/samples/personWalking.mp4 --output outputs/output_video.mp4 --track
 ```
 
-#### 3. Process with tracking enabled
+### Run detection with evaluation
 
 ```bash
-python video_object_detection.py --input input_video.mp4 --output output_video.mp4 --class-id 0 --track
+python scripts/video_object_detection.py --input data/samples/personWalking.mp4 --output outputs/output_video.mp4 --ground-truth ground_truth.json
 ```
 
-#### Command-line arguments
+### Create ground-truth annotations
 
-- `--input`: Path to input video file (required)
-- `--output`: Path to output video file (default: `output_video.mp4`)
-- `--model`: YOLO model file (default: `yolov8n.pt`)
-- `--confidence`: Confidence threshold in [0, 1] (default: 0.25)
-- `--class-id`: COCO class ID to detect (default: 0 = person). Use `2` for cars.
-- `--ground-truth`: Path to ground truth JSON file (optional)
-- `--iou-threshold`: IoU threshold in [0, 1] for matching (default: 0.5)
-- `--track`: Enable multi-object tracking and include track IDs in output
+```bash
+python scripts/annotate_ground_truth.py --video data/samples/personWalking.mp4 --output ground_truth.json --frame 0
+```
+
+### Run example script
+
+```bash
+python examples/example_usage.py
+```
+
+## CLI Options
+
+Detection script (`scripts/video_object_detection.py`):
+
+- `--input`: Input video path (required)
+- `--output`: Output video path (default: `outputs/output_video.mp4`)
+- `--model`: Model path (default: `models/yolov8n.pt`)
+- `--confidence`: Confidence threshold in `[0,1]`
+- `--class-id`: COCO class ID (default: `0`)
+- `--ground-truth`: Ground-truth JSON path
+- `--iou-threshold`: IoU threshold in `[0,1]`
+- `--track`: Enable tracking mode
 - `--tracker`: Ultralytics tracker config (default: `bytetrack.yaml`)
 
-### Option 2: Use the Jupyter notebook
+## Output Artifacts
 
-1. Open `video_object_detection.ipynb` in Jupyter Notebook
-2. Update the configuration section with your video file path
-3. Run all cells sequentially
+Given `--output outputs/output_video.mp4`, sidecar files are written as:
 
-### Create ground truth annotations
+- `outputs/output_video_detections.json`
+- `outputs/output_video_evaluation_report.txt` (when ground truth is provided)
 
-If your video does not have annotations, create them with:
-
-```bash
-python annotate_ground_truth.py --video input_video.mp4 --output ground_truth.json --frame 0
-```
-
-Annotation controls:
-
-- Click and drag: draw bounding boxes
-- `s`: save annotations for current frame and exit
-- `d`: delete last box
-- `c`: clear all boxes
-- `q`: quit without saving
-- `n`: next frame
-- `p`: previous frame
-
-## Output files
-
-After processing, these files are generated:
-
-1. **Output Video** (`output_video.mp4`): Input video with detections drawn
-2. **Detections JSON** (`output_video_detections.json`): Per-frame detection output (includes `track_id` when tracking is enabled)
-3. **Evaluation Report** (`output_video_evaluation_report.txt`): Detailed evaluation metrics (if ground truth is provided)
-
-Sidecar files are derived from the output filename stem, so they work for non-`.mp4` output names too.
-
-## Ground truth format
-
-Ground truth annotations should be JSON:
+## Ground Truth Format
 
 ```json
 {
-  "0": [[x1, y1, x2, y2], [x1, y1, x2, y2]],
-  "10": [[x1, y1, x2, y2]],
-  "20": [[x1, y1, x2, y2]]
+  "0": [[x1, y1, x2, y2]],
+  "10": [[x1, y1, x2, y2]]
 }
 ```
 
-Where:
-
-- Keys are frame numbers (as strings)
-- Values are arrays of bounding boxes
-- Each box is `[x1, y1, x2, y2]` (top-left and bottom-right)
-
-## YOLO models
-
-The project uses pre-trained models from Ultralytics. Common options:
-
-- `yolov8n.pt` - Nano (fastest, smallest)
-- `yolov8s.pt` - Small
-- `yolov8m.pt` - Medium
-- `yolov8l.pt` - Large
-- `yolov8x.pt` - Extra Large (most accurate)
-
-## Detection classes
-
-By default, the system detects people (class `0` in COCO). To detect other objects, pass `--class-id`.
-
-Common COCO classes:
-
-- 0: person
-- 2: car
-- 3: motorcycle
-- 5: bus
-- 7: truck
-
-## Evaluation metrics
-
-The system calculates:
-
-- **IOU (Intersection over Union)**
-- **Precision** = TP / (TP + FP)
-- **Recall** = TP / (TP + FN)
-- **F1 Score** = harmonic mean of precision and recall
-
-## Example workflow
-
-1. Prepare your video in the project directory
-2. Create ground truth if needed:
+## Tests
 
 ```bash
-python annotate_ground_truth.py --video input_video.mp4 --output ground_truth.json
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
-
-3. Run detection and evaluation:
-
-```bash
-python video_object_detection.py --input input_video.mp4 --output output_video.mp4 --ground-truth ground_truth.json
-```
-
-4. Review output video and evaluation report
-
-## Troubleshooting
-
-### Video codec issues
-
-If you encounter codec issues, try installing additional codecs or changing video format.
-
-### CUDA/GPU support
-
-YOLO automatically uses GPU if available. CPU-only mode is supported but slower.
-
-### Memory issues
-
-For very long videos, process in chunks or use a smaller model (`yolov8n.pt`).
-
-## Project structure
-
-```text
-.
-|-- video_object_detection.py      # Main detection script
-|-- video_object_detection.ipynb   # Jupyter notebook version
-|-- annotate_ground_truth.py       # Ground truth annotation tool
-|-- requirements.txt               # Python dependencies
-`-- README.md                      # This file
-```
-
-## References
-
-- [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
-- [YOLO Models](https://github.com/ultralytics/ultralytics#models)
-- [Video Object Segmentation Datasets](https://github.com/xiaobai1217/Awesome-Video-Datasets)
 
 ## License
 
